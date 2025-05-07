@@ -1,7 +1,16 @@
 import React from 'react'
 import { useState, useEffect, useRef } from 'react'
-import { Pencil, Trash2, X, Camera, Check } from 'lucide-react'
+import { Pencil, Trash2, X, Camera, Check, Copy, ClipboardCheck } from 'lucide-react'
 import Loader from './Loader'
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import { z } from 'zod';
+
+// Definim schema de validare pentru citat
+const QuoteSchema = z.object({
+    quote: z.string().min(5, { message: "Citatul nu poate sa aiba mai putin de 5 caractere" }),
+    author: z.string().min(2, { message: "Numele autorului nu poate sa aiba mai putin de 2 caractere" })
+});
 
 const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
     const [editing, setEditing] = useState(false);
@@ -13,6 +22,31 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
     const [previewUrl, setPreviewUrl] = useState('');
     const fileInputRef = useRef(null);
     const [uploadError, setUploadError] = useState('');
+    const [validationErrors, setValidationErrors] = useState({});
+    const [deleting, setDeleting] = useState(false);
+    const [copying, setCopying] = useState(false);
+
+    const [dark, setDark] = useState(false);
+    // Adaugă acest useEffect pentru a sincroniza starea locală 'dark' cu starea din App
+    // În QuoteComponent
+    useEffect(() => {
+        // Funcție pentru a actualiza tema când se declanșează evenimentul
+        const handleThemeChange = (event) => {
+            setDark(event.detail.isDark);
+        };
+
+        // Adaugă event listener
+        window.addEventListener('themeChange', handleThemeChange);
+
+        // Cleanup
+        return () => {
+            window.removeEventListener('themeChange', handleThemeChange);
+        };
+    }, []);
+
+
+    // ID referință pentru toast-ul de confirmare
+    const deleteToastId = useRef(null);
 
     const [editedQuote, setEditedQuote] = useState({
         quote: '',
@@ -66,6 +100,14 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
             ...prev,
             [name]: value
         }));
+
+        // Reset validation error for this field when user types
+        if (validationErrors[name]) {
+            setValidationErrors(prev => ({
+                ...prev,
+                [name]: null
+            }));
+        }
     };
 
     const toggleEdit = () => {
@@ -78,10 +120,14 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
         }
         setEditing(true);
         setUploadError(''); // Resetăm erorile de upload
+        setValidationErrors({});
+        toast.info("Editați citatul", {
+            position: "top-right",
+            autoClose: 2000
+        });
     };
 
     const triggerFileInput = () => {
-
         if (fileInputRef.current) {
             // Resetăm valoarea pentru a permite selectarea aceluiași fișier de mai multe ori
             fileInputRef.current.value = '';
@@ -91,12 +137,15 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
     };
 
     const handleFileChange = (e) => {
-
         const file = e.target.files[0];
         if (file) {
             // Verificare dimensiune fișier (maxim 5MB)
             if (file.size > 5 * 1024 * 1024) {
                 setUploadError('Imaginea este prea mare. Dimensiunea maximă este de 5MB.');
+                toast.error('Imaginea este prea mare. Dimensiunea maximă este de 5MB.', {
+                    position: "top-right",
+                    autoClose: 5000
+                });
                 return;
             }
 
@@ -104,6 +153,10 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
             const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
             if (!allowedTypes.includes(file.type)) {
                 setUploadError('Tip de fișier nepermis. Încarcă o imagine JPG, PNG, WEBP sau GIF.');
+                toast.error('Tip de fișier nepermis. Încarcă o imagine JPG, PNG, WEBP sau GIF.', {
+                    position: "top-right",
+                    autoClose: 5000
+                });
                 return;
             }
 
@@ -114,7 +167,10 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
             const objectUrl = URL.createObjectURL(file);
             setPreviewUrl(objectUrl);
 
-
+            toast.info('Imagine nouă selectată', {
+                position: "top-right",
+                autoClose: 2000
+            });
         }
     };
 
@@ -126,11 +182,49 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
         setNewImage(null);
         setEditingImage(false);
         setUploadError('');
+
+        toast.info('Modificarea imaginii a fost anulată', {
+            position: "top-right",
+            autoClose: 2000
+        });
+    };
+
+    const validateQuote = () => {
+        try {
+            QuoteSchema.parse(editedQuote);
+            setValidationErrors({});
+            return true;
+        } catch (error) {
+            if (error instanceof z.ZodError) {
+                const errors = {};
+                error.errors.forEach(err => {
+                    const path = err.path[0];
+                    errors[path] = err.message;
+
+                    // Afișăm fiecare eroare ca un toast
+                    toast.error(`${err.message}`, {
+                        position: "top-right",
+                        autoClose: 5000
+                    });
+                });
+                setValidationErrors(errors);
+            }
+            return false;
+        }
     };
 
     const handleEdit = async () => {
         if (!blockQuote || !blockQuote._id) {
             console.error("Nu există un citat pentru editare");
+            toast.error("Nu există un citat pentru editare", {
+                position: "top-right",
+                autoClose: 5000
+            });
+            return;
+        }
+
+        // Validăm datele înainte de a face request-ul
+        if (!validateQuote()) {
             return;
         }
 
@@ -141,25 +235,18 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
             let res;
 
             if (newImage) {
-
-
                 // Dacă există o nouă imagine, folosim FormData
                 const formData = new FormData();
                 formData.append('quote', editedQuote.quote);
                 formData.append('author', editedQuote.author);
                 formData.append('authorImage', newImage);
 
-                // Log pentru a verifica ce conține FormData
-
-
-                // Folosim endpoint-ul dedicat pentru upload, adica celgenerakl=
+                // Folosim endpoint-ul dedicat pentru upload
                 res = await fetch(`http://localhost:5000/api/quotes/${blockQuote._id}`, {
                     method: 'PUT',
                     body: formData,
                 });
             } else {
-
-
                 // Dacă nu există o nouă imagine, folosim JSON normal
                 res = await fetch(`http://localhost:5000/api/quotes/${blockQuote._id}`, {
                     method: 'PUT',
@@ -179,7 +266,6 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
                     throw new Error(responseData.message || 'Failed to edit quote');
                 }
 
-
                 // Resetăm starea de editare a imaginii
                 if (previewUrl) {
                     URL.revokeObjectURL(previewUrl);
@@ -193,6 +279,12 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
                 if (onQuoteUpdated) {
                     onQuoteUpdated(responseData);
                 }
+
+                // Afișăm un toast de succes
+                toast.success("Citatul a fost actualizat cu succes!", {
+                    position: "top-right",
+                    autoClose: 3000
+                });
             } else {
                 throw new Error('Răspuns neașteptat de la server');
             }
@@ -200,6 +292,12 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
             setErrorEdit(true);
             setUploadError(error.message || "A apărut o eroare la editare");
             console.error("Eroare la editare:", error.message);
+
+            // Afișăm un toast de eroare
+            toast.error(`Eroare la editare: ${error.message || "A apărut o eroare"}`, {
+                position: "top-right",
+                autoClose: 5000
+            });
         } finally {
             setLoadEdit(false);
             setEditing(false);
@@ -215,37 +313,151 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
         }
         setNewImage(null);
         setUploadError('');
+        setValidationErrors({});
+
+        toast.info("Editarea a fost anulată", {
+            position: "top-right",
+            autoClose: 2000
+        });
     };
 
+    const copyQuote = async () => {
+        if (!blockQuote) return;
+
+        const TextToCopy = `"${blockQuote.quote}" — ${blockQuote.author}`;
+        try {
+
+            await navigator.clipboard.writeText(TextToCopy);
+
+            setCopying(true);
+
+            toast.success("Citat copiat in clipboard", {
+                position: "top-right",
+                autoClose: 2000
+            })
+
+
+        } catch (error) {
+            console.error("Eroare la copierea citatului:", error)
+
+            toast.error("Nu s-a putut copia citatul. Incearca din nou.", {
+                position: "top-right",
+                autoClose: 3000
+            })
+        }
+    }
+
+    // Resetează starea de copiere după 5000 ms (5 secunde)
+    useEffect(() => {
+        if (copying) {
+            const timer = setTimeout(() => {
+                setCopying(false);
+            }, 5000); // Modificat de la 2000 la 5000 ms
+            return () => clearTimeout(timer);
+        }
+    }, [copying]);
+
+    // Funcție pentru confirmarea ștergerii
+    const confirmDelete = () => {
+        if (!blockQuote || !blockQuote._id || deleting) return;
+
+        // Opțiunile pentru toast-ul de confirmare
+        const toastOptions = {
+            position: "top-center",
+            autoClose: false,
+            hideProgressBar: false,
+            closeOnClick: false,
+            pauseOnHover: true,
+            draggable: false,
+            progress: undefined,
+            closeButton: false,
+        };
+
+        // Crează conținutul toast-ului
+        const Msg = () => (
+            <div className="confirm-toast">
+                <div className="font-bold mb-2">Confirmare ștergere</div>
+                <p className="mb-4">Ești sigur că vrei să ștergi acest citat?</p>
+                <div className="flex justify-between">
+                    <button
+                        onClick={() => {
+                            // Închide toast-ul și execută ștergerea
+                            toast.dismiss(deleteToastId.current);
+                            handleDelete();
+                        }}
+                        className="bg-red-500 hover:bg-red-700 text-white px-3 py-1 rounded"
+                    >
+                        Da, șterge
+                    </button>
+                    <button
+                        onClick={() => {
+                            // Doar închide toast-ul
+                            toast.dismiss(deleteToastId.current);
+                            setDeleting(false);
+                        }}
+                        className="bg-gray-500 hover:bg-gray-700 text-white px-3 py-1 rounded"
+                    >
+                        Anulare
+                    </button>
+                </div>
+            </div>
+        );
+
+        // Afișează toast-ul și păstrează ID-ul
+        setDeleting(true);
+        deleteToastId.current = toast.warning(<Msg />, toastOptions);
+    };
+
+    // Funcție pentru ștergerea propriu-zisă
     const handleDelete = async () => {
         if (!blockQuote || !blockQuote._id) return;
 
-        if (window.confirm("Ești sigur că vrei să ștergi acest citat?")) {
-            try {
-                const res = await fetch(`http://localhost:5000/api/quotes/${blockQuote._id}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    }
-                });
-
-                if (!res.ok) {
-                    throw new Error('Failed to delete quote');
+        try {
+            const res = await fetch(`http://localhost:5000/api/quotes/${blockQuote._id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
                 }
+            });
 
-                // Notifică componenta părinte să reîncarce datele
-                if (onQuoteUpdated) {
-                    onQuoteUpdated(null);
-                }
-                window.location.reload();
-            } catch (error) {
-                console.error(error.message);
+            if (!res.ok) {
+                throw new Error('Failed to delete quote');
             }
+
+            // Notifică componenta părinte să reîncarce datele
+            if (onQuoteUpdated) {
+                onQuoteUpdated(null);
+            }
+
+            // Afișăm un toast de succes 
+            toast.success("Citatul a fost șters cu succes!", {
+                position: "top-right",
+                autoClose: 2000
+            });
+
+            // După 2 secunde, reîncarcă pagina
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+
+        } catch (error) {
+            console.error(error.message);
+
+            // Afișăm un toast de eroare
+            toast.error(`Eroare la ștergere: ${error.message || "A apărut o eroare"}`, {
+                position: "top-right",
+                autoClose: 5000
+            });
+        } finally {
+            setDeleting(false);
         }
     };
 
     return (
-        <div className="max-w-2xl p-6 bg-white rounded-lg shadow-lg w-[350px] h-[300px] overflow-auto">
+        <div className={`max-w-2xl p-6  rounded-lg shadow-lg w-[350px] h-[300px] overflow-auto ${dark ? "bg-gray-900 text-white" : "bg-white"}`}>
+            {/* ToastContainer - adăugat pentru notificări */}
+            <ToastContainer />
+
             {/* Input ascuns pentru încărcarea imaginii */}
             <input
                 type="file"
@@ -275,6 +487,10 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
                                 console.log("Eroare la încărcarea imaginii");
                                 e.target.src = defaultImage;
                                 e.target.onerror = null;
+                                toast.warning("Nu s-a putut încărca imaginea originală", {
+                                    position: "top-right",
+                                    autoClose: 3000
+                                });
                             }}
                         />
                         <div
@@ -300,7 +516,7 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
                     )}
 
                     <textarea
-                        className="border border-gray-300 rounded-lg p-4 mb-4 w-full"
+                        className={`border ${validationErrors.quote ? 'border-red-500' : 'border-gray-300'} rounded-lg p-4 mb-4 w-full`}
                         name="quote"
                         id="quote"
                         value={editedQuote.quote || ''}
@@ -308,14 +524,22 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
                         rows={3}
                         placeholder="Introdu citatul aici..."
                     ></textarea>
+                    {validationErrors.quote && (
+                        <p className="text-red-500 text-sm -mt-3 mb-2 w-full text-left">{validationErrors.quote}</p>
+                    )}
+
                     <input
                         type="text"
                         name="author"
-                        className="border border-gray-300 rounded-lg p-4 mb-4 w-full"
+                        className={`border ${validationErrors.author ? 'border-red-500' : 'border-gray-300'} rounded-lg p-4 mb-4 w-full`}
                         value={editedQuote.author || ''}
                         onChange={handleChange}
                         placeholder="Nume autor"
                     />
+                    {validationErrors.author && (
+                        <p className="text-red-500 text-sm -mt-3 mb-2 w-full text-left">{validationErrors.author}</p>
+                    )}
+
                     {errorEdit && (
                         <p className="text-red-500 mb-4">An error occurred while editing. Please try again.</p>
                     )}
@@ -337,7 +561,7 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
                         </button>
                     </div>
                 </div>
-            ) : blockQuote ? (
+            ) : blockQuote && imageUrl !== "" ? (
                 <div className="text-center flex flex-col items-center justify-between h-full">
                     <div className="image-container mb-4">
                         <img
@@ -348,6 +572,10 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
                                 console.log("Eroare la încărcarea imaginii în modul vizualizare");
                                 e.target.src = defaultImage;
                                 e.target.onerror = null;
+                                toast.warning("Nu s-a putut încărca imaginea autorului", {
+                                    position: "top-right",
+                                    autoClose: 3000
+                                });
                             }}
                         />
                     </div>
@@ -363,8 +591,16 @@ const QuoteComponent = ({ blockQuote, loading, error, onQuoteUpdated }) => {
                             <Pencil />
                         </button>
                         <button
-                            className='text-red-800 hover:text-red-600 cursor-pointer transition duration-200 ease-linear hover:shadow-md hover:shadow-red-800 p-2 rounded-md'
-                            onClick={handleDelete}
+                            className={`text-green-800 hover:text-green-600 cursor-pointer transition duration-200 ease-linear hover:shadow-md hover:shadow-green-800 p-2 rounded-md`}
+                            onClick={copyQuote}
+                            aria-label="Copiază citatul"
+                        >
+                            {copying ? <ClipboardCheck /> : <Copy />}
+                        </button>
+                        <button
+                            className={`text-red-800 hover:text-red-600 cursor-pointer transition duration-200 ease-linear hover:shadow-md hover:shadow-red-800 p-2 rounded-md ${deleting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            onClick={confirmDelete}
+                            disabled={deleting}
                         >
                             <Trash2 />
                         </button>

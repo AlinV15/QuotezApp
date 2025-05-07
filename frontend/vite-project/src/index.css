@@ -11,8 +11,17 @@
 
 
 
-.color-primary {
+.bg-primary {
   background-color: var(--primary-color);
+}
+
+.color-primary {
+  color: #1A365D;
+
+}
+
+.bg-secondary {
+  background-color: var(--secondary-color);
 }
 
 .color-secondary {

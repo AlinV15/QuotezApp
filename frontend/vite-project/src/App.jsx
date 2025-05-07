@@ -11,6 +11,30 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [blockQuote, setBlockQuote] = useState(null);
+  const [dark, setDark] = useState(false);
+
+  // La inițializare
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark') {
+      setDark(true);
+
+    }
+  }, []);
+
+  // La schimbarea temei
+  // În App.jsx
+  const handleTheme = () => {
+    const newDarkValue = !dark;
+    setDark(newDarkValue);
+    localStorage.setItem('theme', newDarkValue ? 'dark' : 'light');
+
+    // Creează un eveniment personalizat
+    const event = new CustomEvent('themeChange', { detail: { isDark: newDarkValue } });
+    window.dispatchEvent(event);
+  };
+
+
 
   const fetchQuote = async () => {
     setLoading(true);
@@ -71,8 +95,8 @@ function App() {
   }, []);
 
   return (
-    <div className="color-background color-text">
-      <Header />
+    <div className={`min-h-screen ${!dark ? "color-background color-text" : "bg-gray-800 text-white"}`}>
+      <Header handleChangeTheme={handleTheme} />
 
       <Routes>
         <Route
@@ -101,7 +125,7 @@ function App() {
           path="/add-quote"
           element={
             <CreateQuote
-            // onQuoteAdded={() => fetchQuote()}
+              onQuoteAdded={() => fetchQuote()}
             />
           }
         />

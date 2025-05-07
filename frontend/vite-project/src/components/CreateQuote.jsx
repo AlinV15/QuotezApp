@@ -1,9 +1,23 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Camera, X } from 'lucide-react';
 import Loader from './Loader';
+import { z } from 'zod';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
+// Schema Zod pentru validarea citatului
+const quoteSchema = z.object({
+  quote: z.string({
+    required_error: "Quote text is required"
+  }).min(5, "Quote cannot be less than 5 characters"),
+  author: z.string({
+    required_error: "Author is required"
+  }).min(2, "Author cannot have less than 2 characters")
+});
 
 const CreateQuote = ({ onQuoteAdded }) => {
+  // State-uri pentru formular
   const [formData, setFormData] = useState({
     quote: '',
     author: ''
@@ -11,19 +25,39 @@ const CreateQuote = ({ onQuoteAdded }) => {
   const [authorImage, setAuthorImage] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
   const [error, setError] = useState(false);
+  const [errors, setErrors] = useState({});
   const [uploadError, setUploadError] = useState('');
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
   const navigate = useNavigate();
+  const [dark, setDark] = useState(false);
 
+  useEffect(() => {
+    const theme = localStorage.getItem("theme");
+    if (theme === "dark") {
+      setDark(true)
+    } else setDark(false)
+  }, [])
+
+
+  // Actualizează starea formularului când se modifică un câmp
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: value
     }));
+
+    // Șterge eroarea pentru câmpul modificat
+    if (errors[name]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: null
+      }));
+    }
   };
 
+  // Declanșează dialogul de selectare a fișierului
   const triggerFileInput = () => {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -31,12 +65,17 @@ const CreateQuote = ({ onQuoteAdded }) => {
     }
   };
 
+  // Procesează schimbarea imaginii
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
       // Verificare dimensiune fișier (maxim 5MB)
       if (file.size > 5 * 1024 * 1024) {
         setUploadError('Imaginea este prea mare. Dimensiunea maximă este de 5MB.');
+        toast.error('Imaginea este prea mare. Dimensiunea maximă este de 5MB.', {
+          position: "top-right",
+          autoClose: 5000
+        });
         return;
       }
 
@@ -44,6 +83,10 @@ const CreateQuote = ({ onQuoteAdded }) => {
       const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
       if (!allowedTypes.includes(file.type)) {
         setUploadError('Tip de fișier nepermis. Încarcă o imagine JPG, PNG, WEBP sau GIF.');
+        toast.error('Tip de fișier nepermis. Încarcă o imagine JPG, PNG, WEBP sau GIF.', {
+          position: "top-right",
+          autoClose: 5000
+        });
         return;
       }
 
@@ -53,9 +96,40 @@ const CreateQuote = ({ onQuoteAdded }) => {
       // Create a preview
       const objectUrl = URL.createObjectURL(file);
       setPreviewImage(objectUrl);
+
+      toast.info('Imagine nouă selectată', {
+        position: "top-right",
+        autoClose: 2000
+      });
     }
   };
 
+  // Validează formularul folosind schema Zod
+  const validateForm = () => {
+    try {
+      quoteSchema.parse(formData);
+      setErrors({});
+      return true;
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const formattedErrors = {};
+        error.errors.forEach(err => {
+          const path = err.path[0];
+          formattedErrors[path] = err.message;
+
+          // Afișăm fiecare eroare ca un toast
+          toast.error(`${err.message}`, {
+            position: "top-right",
+            autoClose: 5000
+          });
+        });
+        setErrors(formattedErrors);
+      }
+      return false;
+    }
+  };
+
+  // Anulează selecția imaginii
   const cancelImageSelection = () => {
     if (previewImage) {
       URL.revokeObjectURL(previewImage);
@@ -63,10 +137,19 @@ const CreateQuote = ({ onQuoteAdded }) => {
     setPreviewImage(null);
     setAuthorImage(null);
     setUploadError('');
+    toast.info('Modificarea imaginii a fost anulată', {
+      position: "top-right",
+      autoClose: 2000
+    });
   };
 
+  // Gestionează trimiterea formularului
   const handleSubmit = async (event) => {
     event.preventDefault();
+
+    // Validează formularul înainte de trimitere
+    if (!validateForm()) return;
+
     setLoading(true);
     setError(false);
     setUploadError('');
@@ -109,27 +192,48 @@ const CreateQuote = ({ onQuoteAdded }) => {
         onQuoteAdded();
       }
 
-      // Navigate to home page after successful submission
-      navigate('/');
+      // Afișăm un toast de succes înainte de navigare
+      toast.success("Citatul a fost creat cu succes!", {
+        position: "top-right",
+        autoClose: 300,
+        onClose: () => {
+          // Navigăm doar după ce toastul se închide
+          navigate('/');
+        }
+      });
     } catch (err) {
       console.error(err.message);
       setError(true);
       setUploadError(err.message);
+
+      // Afișăm un toast de eroare
+      toast.error(`Eroare la salvare: ${err.message}`, {
+        position: "top-right",
+        autoClose: 500
+      });
     } finally {
       setLoading(false);
     }
   };
 
+  // Gestionează anularea formularului
   const handleCancel = () => {
     // Curățăm resursele înainte de a naviga înapoi
     if (previewImage) {
       URL.revokeObjectURL(previewImage);
     }
-    navigate('/');
+
+    toast.info("Acțiune anulată", {
+      position: "top-right",
+      autoClose: 200,
+      onClose: () => navigate('/')
+    });
   };
 
   return (
-    <section className="max-w-xl mx-auto mt-8 p-6 bg-white rounded-lg shadow-lg">
+    <section className={`max-w-xl mx-auto mt-8 p-6 rounded-lg shadow-lg ${dark && "bg-gray-800 text-white"}`}>
+      <ToastContainer />
+
       <h2 className="text-2xl font-semibold text-center mb-6 poppins-regular">Create a Quote</h2>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -138,7 +242,7 @@ const CreateQuote = ({ onQuoteAdded }) => {
           <div className="relative group">
             <div
               onClick={triggerFileInput}
-              className={`w-24 h-24 rounded-full border-2 ${previewImage ? 'border-blue-500' : 'border-gray-300'} flex items-center justify-center cursor-pointer hover:opacity-90 transition-all duration-300 overflow-hidden shadow-md`}
+              className={`w-24 h-24 rounded-full border-2 ${previewImage ? 'border-blue-500' : 'border-gray-300'} flex items-center justify-center cursor-pointer hover:opacity-90 transition-all duration-300 overflow-hidden shadow-md `}
             >
               {previewImage ? (
                 <img
@@ -197,8 +301,9 @@ const CreateQuote = ({ onQuoteAdded }) => {
             required
             rows={4}
             placeholder="Introdu citatul aici..."
-            className="w-full border border-gray-300 rounded-lg p-3 libre-regular focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+            className={`w-full border ${errors.quote ? 'border-red-500' : 'border-gray-300'} rounded-lg p-3 libre-regular focus:ring-2 focus:ring-blue-500 focus:border-transparent transition`}
           />
+          {errors.quote && (<p className='text-red-600 text-sm'>{errors.quote}</p>)}
         </div>
 
         {/* Câmp pentru autor */}
@@ -214,11 +319,12 @@ const CreateQuote = ({ onQuoteAdded }) => {
             onChange={handleChange}
             required
             placeholder="Numele autorului"
-            className="w-full border border-gray-300 rounded-lg p-3 libre-regular focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+            className={`w-full border ${errors.author ? 'border-red-500' : 'border-gray-300'} rounded-lg p-3 libre-regular focus:ring-2 focus:ring-blue-500 focus:border-transparent transition`}
           />
+          {errors.author && (<p className='text-red-600 text-sm'>{errors.author}</p>)}
         </div>
 
-        {/* Mesaj de eroare */}
+        {/* Mesaj de eroare general */}
         {error && (
           <div className="text-red-600 text-center">
             Error saving quote. Please try again.
